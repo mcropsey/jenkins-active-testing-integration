@@ -19,7 +19,6 @@ _Last verified: 2026-11-18 (Jenkins builds #48 to #51)._
 | AT tenant | https://mikec-lab.nonamesec.com (backend version 3.73.6 at setup time) |
 | AT app | **VNotes**: `ab930b27-1a22-4acf-b5bf-0add38e87a62` |
 | AT env (CI) | **Jenkins CI**: `2f05f900-45ce-4f65-b213-a0838416d548` (type **cicd**) |
-| AT env (manual) | **Default**: `a3ee1a6a-18a3-471f-891e-c220c0096ea7` (type deployment, for manual UI scans; same 4 auths) |
 | Test profile | Default API Security Tests: `892b51de-67cf-4328-beea-3ade61bcdeb2` |
 | Scanner image | `us-central1-docker.pkg.dev/noname-artifacts/nns-docker/active-cli:<backend version>` |
 
@@ -34,8 +33,7 @@ GitHub push ─► Jenkins vnotes job
    └─ Active Scan
         1. SA client id/secret ─► POST /auth/token ─► accessToken (ACTIVE_API_TOKEN)
         2. akamai/refresh-auths.sh: log in alice/bob/charlie/admin, PUT fresh
-           "Authorization: Bearer <jwt>" into the 4 authentications on BOTH
-           AT envs (Jenkins CI, required; Default, best-effort)
+           "Authorization: Bearer <jwt>" into the Jenkins CI env's 4 authentications
         3. docker login GAR + pull active-cli:<GET /active/backend/version>
         4. active-cli scan --env-id <Jenkins CI> --test-group-id ... --severity-threshold
    Result: SUCCESS = no findings ≥ threshold · UNSTABLE = findings ≥ threshold · FAILURE = pipeline/scan error
@@ -97,7 +95,7 @@ curl -sS -H "Authorization: Bearer $T" https://mikec-lab.nonamesec.com/api/activ
 ### 4a. Application (done through the Active Testing MCP server, or the UI)
 - **Applications → New** · Name `VNotes` · Base URL `https://notes.cropseyit.com`
 - Source: OpenAPI by URL `https://notes.cropseyit.com/openapi.json`
-- This also creates the **Default** (deployment) environment.
+- This also auto-creates a **Default** (deployment) environment. It was **deleted** here because all scans go through Jenkins CI. Manual UI scans can target Jenkins CI too.
 
 ### 4b. CI/CD environment "Jenkins CI"
 It must be **type `cicd`**. MCP `create_environment` always creates `deployment`, and the
@@ -210,7 +208,7 @@ It uses only bash, curl, sed and grep, because the Jenkins container has no pyth
    - `Refreshed AT auth: alice|bob|charlie|admin` → `Refreshed 4 authentication(s)`
    - `Using active-cli:3.73.6`, `Login Succeeded`
    - scan progress and the findings list
-3. In AT: **VNotes → Scans → Environment dropdown = "Jenkins CI"**. If you leave the dropdown on *Default*, it looks like Jenkins never scanned.
+3. In AT: **VNotes → Scans → Environment dropdown = "Jenkins CI"** (the only environment).
 4. Manual re-run with no redeploy: **Build with Parameters → SKIP_DEPLOY ✓**.
 
 ### Verification log (2026-11-18)
@@ -219,7 +217,7 @@ It uses only bash, curl, sed and grep, because the Jenkins container has no pyth
 |---|---|---|---|
 | #48 | GitHub push | FAILURE | Token, auth refresh, registry login and image pull were all OK. Then `SEVERITY_THRESHOLD: unbound variable`, because Jenkins doesn't define `params` on the first run of a newly parameterized job. Fixed by defaulting it (`SEVERITY_GATE = params.SEVERITY_THRESHOLD ?: 'high'`). |
 | #49 | GitHub push | **UNSTABLE** (as designed) | Full authenticated scan, about 3 min. Threshold `high` exceeded (2 HIGH). BOLA test **passed** only because `app/` was the *fixed* variant at the time (see below). |
-| #50 | GitHub push | (running at time of posting) | First run with the 10 req/s rate limit, and refreshes the Default env auths too. |
+| #50 | GitHub push | **UNSTABLE** (as designed) | First run with the 10 req/s rate limit: zero `rate limit exceeded`, about 9.7 min, and it also caught *Weak Password Policy* (MEDIUM), which #49 missed. Still the fixed app, so no BOLA. |
 | #51 | GitHub push | (queued at time of posting) | First run with the **vulnerable** app variant restored. Expected: "Resource is Accessible Across Users" FAILED on `/api/notes/{note_id}`. |
 
 Build #49 findings: 2 HIGH ("Sensitive API accessed over HTTP" on `/api/auth/login` and `/api/auth/register`) and 2 MEDIUM (Weak JWT Algorithm, Excessive JWT Token Expiration). LOW: Server Information Disclosure, Username Enumeration, Publicly Exposed OpenAPI Specification. INFO: security headers, OpenAPI field-type mismatches.
@@ -245,7 +243,7 @@ BOLA test. It creates and discovers object IDs itself, so you don't supply note 
 
 ### Gotcha 2: Kong rate limit in front of the app
 `notes.cropseyit.com` goes through Cloudflare, then Kong (`x-kong-request-id`), which allows **1000 req/min**. An unthrottled scan
-starts getting `API rate limit exceeded`, and 429s can turn real failures into false "PASSED" results. Both AT envs are
+starts getting `API rate limit exceeded`, and 429s can turn real failures into false "PASSED" results. The AT env is
 therefore capped at **10 req/s** (`rate_limit_requests=10, rate_limit_seconds=1`). Set this in the UI under Environment Settings → Rate limit, or:
 ```bash
 curl -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
