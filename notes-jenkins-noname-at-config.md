@@ -48,7 +48,7 @@ GitHub push ─► Jenkins vnotes job
 | alice | alice123 | user |
 | bob | bob12345 | user |
 | charlie | charlie1 | user |
-| admin | admin123 | admin |
+| admin | admin123 | **user** (see note below) |
 
 Login is OAuth2 password **form** style (not JSON):
 
@@ -56,6 +56,18 @@ Login is OAuth2 password **form** style (not JSON):
 curl -X POST https://notes.cropseyit.com/api/auth/login -d 'username=alice&password=alice123'
 # {"access_token":"eyJ...","token_type":"bearer"}   <- JWT valid 24h
 ```
+
+**Why admin has AT role `user`:** VNotes stores an `is_admin` flag but **no endpoint checks it**.
+The admin account has exactly the same access as alice, bob and charlie, so there's no admin-only function
+for BFLA to test. AT's authorization tests (BOLA/BFLA) also need **at least 2 auths per role**. With admin as
+the only `admin`-role auth, Coverage Center showed the open task *"Add a second authentication for the 'admin'
+role"*. Setting admin's role to `user` matches the app's real behavior, gives 4 auths in one role for the
+cross-user BOLA test, and clears the task (`singleAuthForRoles: []`). If admin-only endpoints are ever added,
+add a second admin (seed in `app/main.py`) and set both to role `admin` so BFLA can be tested.
+
+Normal users should only see their own notes. `GET /api/notes` filters by owner, but in the vulnerable variant
+`GET/PUT/DELETE /api/notes/{note_id}` skip the ownership check, so any logged-in user can read, modify or
+delete any note by ID. That is the BOLA that AT detects.
 
 The JWTs expire after 24h, so static tokens saved in AT go stale. The
 pipeline re-mints them every build (step 6).
@@ -116,14 +128,14 @@ curl -sS -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/jso
       {"name":"alice","role":"user","mappings":[{"type":"header","key":"Authorization","value":"Bearer <jwt>"}]},
       {"name":"bob","role":"user","mappings":[{"type":"header","key":"Authorization","value":"Bearer <jwt>"}]},
       {"name":"charlie","role":"user","mappings":[{"type":"header","key":"Authorization","value":"Bearer <jwt>"}]},
-      {"name":"admin","role":"admin","mappings":[{"type":"header","key":"Authorization","value":"Bearer <jwt>"}]}
+      {"name":"admin","role":"user","mappings":[{"type":"header","key":"Authorization","value":"Bearer <jwt>"}]}
     ],
     "test_group_id":"892b51de-67cf-4328-beea-3ade61bcdeb2",
     "worker_pool":"default_pool", "timeout":60
   }'
 ```
 
-**The auth names must stay exactly `alice`, `bob`, `charlie`, `admin`.** The refresh script matches on them.
+**The auth names must stay exactly `alice`, `bob`, `charlie`, `admin`.** The refresh script matches on them, and it reads each auth's **role** from AT and keeps it, so a role change made in AT stays in place.
 
 ### 4c. CI/CD scan configuration (Jenkins platform)
 UI: **Settings → CI/CD → Jenkins → existing env "Jenkins CI"**. Test profile is
@@ -238,7 +250,7 @@ TB=$(curl -s -X POST http://192.168.1.98:8000/api/auth/login -d 'username=bob&pa
 curl -s -H "Authorization: Bearer $TB" http://192.168.1.98:8000/api/notes/3   # alice's note: 200 = vulnerable, 403 = fixed
 ```
 
-AT only needs **two or more auths with the same role** (alice, bob and charlie are all `user`) for the cross-user
+AT only needs **two or more auths with the same role** (all four users are `user`) for the cross-user
 BOLA test. It creates and discovers object IDs itself, so you don't supply note IDs.
 
 ### Gotcha 2: Kong rate limit in front of the app
@@ -280,7 +292,8 @@ Set up an Akamai API Security Active Testing CI/CD integration for my app with J
 Inputs:
 - App: https://notes.cropseyit.com  (Swagger UI /docs, OpenAPI spec /openapi.json)
 - Test users (OAuth2 password FORM login at POST /api/auth/login, JWT valid 24h):
-  alice/alice123 (user), bob/bob12345 (user), charlie/charlie1 (user), admin/admin123 (admin)
+  alice/alice123, bob/bob12345, charlie/charlie1, admin/admin123 -- ALL with AT role "user"
+  (VNotes never checks is_admin, and AT needs >=2 auths per role)
 - Git repo: https://github.com/mcropsey/vnotes (branch main, Jenkinsfile at root; push with my
   personal gh account `mcropsey`, then switch back to `mcropsey-akamai`)
 - Jenkins: http://192.168.1.100:8080 (= https://jenkins.cropseyit.com), user admin / <JENKINS_PASSWORD>,
