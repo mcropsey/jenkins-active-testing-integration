@@ -3,7 +3,7 @@
 Step-by-step record of how the VNotes CI/CD integration was moved from the old
 `michaelc-lab` tenant to **`mikec-lab`**, and how to rebuild it from scratch.
 
-_Last verified: 2026-11-18 (Jenkins builds #48 to #51)._
+_Last verified: 2026-11-18. Build #51 detected BOLA (HIGH) on the vulnerable app._
 
 ---
 
@@ -218,7 +218,7 @@ It uses only bash, curl, sed and grep, because the Jenkins container has no pyth
 | #48 | GitHub push | FAILURE | Token, auth refresh, registry login and image pull were all OK. Then `SEVERITY_THRESHOLD: unbound variable`, because Jenkins doesn't define `params` on the first run of a newly parameterized job. Fixed by defaulting it (`SEVERITY_GATE = params.SEVERITY_THRESHOLD ?: 'high'`). |
 | #49 | GitHub push | **UNSTABLE** (as designed) | Full authenticated scan, about 3 min. Threshold `high` exceeded (2 HIGH). BOLA test **passed** only because `app/` was the *fixed* variant at the time (see below). |
 | #50 | GitHub push | **UNSTABLE** (as designed) | First run with the 10 req/s rate limit: zero `rate limit exceeded`, about 9.7 min, and it also caught *Weak Password Policy* (MEDIUM), which #49 missed. Still the fixed app, so no BOLA. |
-| #51 | GitHub push | (queued at time of posting) | First run with the **vulnerable** app variant restored. Expected: "Resource is Accessible Across Users" FAILED on `/api/notes/{note_id}`. |
+| #51 | GitHub push | **UNSTABLE** (as designed) | First run with the **vulnerable** app restored. **BOLA detected:** *Resource is Accessible Across Users (Fuzz-Based)* HIGH on `GET` and `PUT /api/notes/{note_id}`. 4 HIGH total, 0 rate-limit hits, about 8.8 min. |
 
 Build #49 findings: 2 HIGH ("Sensitive API accessed over HTTP" on `/api/auth/login` and `/api/auth/register`) and 2 MEDIUM (Weak JWT Algorithm, Excessive JWT Token Expiration). LOW: Server Information Disclosure, Username Enumeration, Publicly Exposed OpenAPI Specification. INFO: security headers, OpenAPI field-type mismatches.
 
